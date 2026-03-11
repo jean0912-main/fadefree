@@ -1,11 +1,6 @@
 <?php
 include 'db_connect.php';
 
-if ($_SERVER['REQUEST_METHOD'] != 'POST') {
-    echo json_encode(['success' => false, 'error' => 'Invalid request method']);
-    exit();
-}
-
 $receiptNum = $_POST['receiptNum'];
 $cartData = $_POST['cartData']; // JSON string
 $total = $_POST['total'];
