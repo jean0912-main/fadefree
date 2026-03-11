@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FadeFree | Digital POS & Inventory</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+    <h2>FadeFree</h2>
+    <button class="nav-btn active" onclick="showPage('inventoryPage', this)">📦 Inventory</button>
+    <button class="nav-btn" onclick="showPage('sellingPage', this)">💰 Selling / POS</button>
+    <button class="nav-btn" onclick="showPage('reportPage', this)">📈 Sales Report</button>
+    <button class="nav-btn" style="margin-left: auto; background: #95a5a6; font-size: 0.85em;" onclick="window.location.href='debug.php'">🔧 Debug</button>
+</nav>
+
+<main>
+    <div id="inventoryPage" class="page active">
+        <h1>Inventory Management</h1>
+        <div class="card">
+            <h3 id="formTitle">Add New Product</h3>
+            <input type="hidden" id="editItemId"> <div class="grid">
+                <div>
+                    <label>Product Name</label>
+                    <input type="text" id="itemName" placeholder="e.g. Skin Whitening Lotion">
+                </div>
+                <div>
+                    <label>Price (₱)</label>
+                    <input type="number" id="itemPrice" placeholder="0.00">
+                </div>
+            </div>
+            <label>Stock Quantity</label>
+            <input type="number" id="itemStock" placeholder="Quantity">
+            
+            <div id="formActions" style="display: flex; gap: 10px; margin-top: 10px;">
+                <button id="mainBtn" class="btn-action" onclick="addToInventory()">Save to Database</button>
+                <button id="cancelBtn" class="btn-action" style="background:#95a5a6; display:none;" onclick="resetForm()">Cancel</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Current Stock</h3>
+            <table id="inventoryTable">
+                <thead>
+                    <tr><th>ID</th><th>Product</th><th>Price</th><th>Stock</th><th>Action</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="sellingPage" class="page">
+        <h1>Point of Sale</h1>
+        <div class="grid" style="grid-template-columns: 1fr 1fr 1fr;"> <div class="card">
+                <h3>Available Items</h3>
+                <div id="posItems"></div>
+            </div>
+
+            <div class="card">
+                <h3>Order Summary</h3>
+                <div id="orderPreview" style="min-height: 200px;">
+                    <table id="previewTable" style="font-size: 0.9rem;">
+                        <thead>
+                            <tr><th>Item</th><th>Qty</th><th>Price</th></tr>
+                        </thead>
+                        <tbody>
+                            </tbody>
+                    </table>
+                </div>
+                <hr>
+                <div style="display:flex; justify-content: space-between; font-weight: bold; font-size: 1.2rem; padding: 10px 0;">
+                    <span>Total:</span>
+                    <span id="grandTotal">₱0.00</span>
+                </div>
+                <button class="btn-action" id="confirmBtn" onclick="confirmSale()" disabled style="background: #95a5a6;">Confirm & Generate QR</button>
+            </div>
+
+            <div class="card">
+                <h3>Digital Receipt</h3>
+                <div id="qrcode-container">
+                    <div id="qrcode"></div>
+                    <p id="receiptMeta" style="color:#7f8c8d; font-size: 0.9rem; margin-top: 15px; text-align: center;"></p>
+                </div>
+                <button class="btn-action" style="background:#27ae60; margin-top: 15px;" onclick="viewReceipt()">View Receipt</button>
+                <button class="btn-action" style="background:#34495e; margin-top: 10px;" onclick="resetTransaction()">Next Customer</button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Receipt Modal -->
+    <div id="receiptModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; justify-content:center; align-items:center;">
+        <div style="background:white; padding:0; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); width:90%; max-width:400px; max-height:90vh; overflow-y:auto;">
+            <div id="receiptContent" style="padding:20px; font-family:'Courier New', monospace; font-size:0.9rem; line-height:1.6;">
+                <!-- Receipt will be generated here -->
+            </div>
+            <div style="padding:20px; border-top:1px solid #ddd; text-align:center;">
+                <button class="btn-action" style="background:#3498db;" onclick="printReceipt()">🖨️ Print</button>
+                <button class="btn-action" style="background:#95a5a6; margin-left:10px;" onclick="closeReceipt()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reportPage" class="page">
+        <h1>Sales Report</h1>
+        <div class="card">
+            <h3>Performance Tracker</h3>
+            <table id="reportTable">
+                <thead>
+                    <tr><th>Product Name</th><th>Units Sold</th><th>Total Revenue</th></tr>
+                </thead>
+                <tbody>
+                    </tbody>
+            </table>
+        </div>
+    </div>
+</main>
+
+<script>
+    let inventory = [];
+
+    // Load data from MySQL as soon as page opens
+    window.onload = function() {
+        loadInventory();
+    };
+
+    function showPage(pageId, btn) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(pageId).classList.add('active');
+        btn.classList.add('active');
+    }
+
+    function loadInventory() {
+        fetch('fetch_items.php')
+        .then(response => response.json())
+        .then(data => {
+            inventory = data;
+            updateUI();
+        })
+        .catch(err => console.error("Error loading inventory:", err));
+    }
+
+    function addToInventory() {
+        const name = document.getElementById('itemName').value;
+        const price = document.getElementById('itemPrice').value;
+        const stock = document.getElementById('itemStock').value;
+
+        if(!name || !price || !stock) {
+            alert("Please fill all fields");
+            return;
+        }
+
+        let formData = new FormData();
+        formData.append('name', name);
+        formData.append('price', price);
+        formData.append('stock', stock);
+
+        fetch('add_item.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.text())
+        .then(result => {
+            if(result === "Success") {
+                loadInventory(); // Refresh view
+                clearInputs();
+            } else {
+                alert("Error: " + result);
+            }
+        });
+    }
+
+    // 1. Prepare Edit: Fills the form with existing data
+    function prepareEdit(index) {
+        const item = inventory[index];
+        document.getElementById('editItemId').value = item.id;
+        document.getElementById('itemName').value = item.name;
+        document.getElementById('itemPrice').value = item.price;
+        document.getElementById('itemStock').value = item.stock;
+
+        // Change UI to Edit Mode
+        document.getElementById('formTitle').innerText = "Edit Product";
+        document.getElementById('mainBtn').innerText = "Update Product";
+        document.getElementById('mainBtn').setAttribute("onclick", "updateItem()");
+        document.getElementById('cancelBtn').style.display = "block";
+    }
+
+    // 2. Update Item: Sends the edited data to MySQL
+    function updateItem() {
+        const id = document.getElementById('editItemId').value;
+        const name = document.getElementById('itemName').value;
+        const price = document.getElementById('itemPrice').value;
+        const stock = document.getElementById('itemStock').value;
+
+        let formData = new FormData();
+        formData.append('id', id);
+        formData.append('name', name);
+        formData.append('price', price);
+        formData.append('stock', stock);
+
+        fetch('edit_item.php', { method: 'POST', body: formData })
+        .then(res => res.text())
+        .then(result => {
+            if(result === "Success") {
+                loadInventory();
+                resetForm();
+            }
+        });
+    }
+
+    // 3. Delete Item: Removes from MySQL
+    function deleteItem(id) {
+        if(confirm("Are you sure you want to delete this item?")) {
+            let formData = new FormData();
+            formData.append('id', id);
+
+            fetch('delete_item.php', { method: 'POST', body: formData })
+            .then(res => res.text())
+            .then(result => {
+                if(result === "Success") loadInventory();
+            });
+        }
+    }
+
+    // 4. Reset Form: Clears fields and goes back to "Add Mode"
+    function resetForm() {
+        clearInputs();
+        document.getElementById('editItemId').value = "";
+        document.getElementById('formTitle').innerText = "Add New Product";
+        document.getElementById('mainBtn').innerText = "Save to Database";
+        document.getElementById('mainBtn').setAttribute("onclick", "addToInventory()");
+        document.getElementById('cancelBtn').style.display = "none";
+    }
+
+    // Update the updateUI function's Table part:
+    // Inside inventory.forEach((item, index) => { ...
+    // invBody.innerHTML += `
+    //    <tr>
+    //        <td>${item.id}</td>
+    //        <td>${item.name}</td>
+    //        <td>₱${item.price}</td>
+    //        <td>${item.stock}</td>
+    //        <td>
+    //            <button onclick="prepareEdit(${index})" style="background:#3498db; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">Edit</button>
+    //            <button onclick="deleteItem(${item.id})" style="background:#e74c3c; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">Delete</button>
+    //        </td>
+    //    </tr>`;
+
+    function updateUI() {
+        const invBody = document.querySelector('#inventoryTable tbody');
+        invBody.innerHTML = ''; // Clear the table first
+        
+        const posList = document.getElementById('posItems');
+        posList.innerHTML = '';
+
+        const reportBody = document.querySelector('#reportTable tbody');
+        reportBody.innerHTML = '';
+
+        inventory.forEach((item, index) => {
+            // 1. INVENTORY TABLE (The part with Edit/Delete)
+            invBody.innerHTML += `
+                <tr>
+                    <td>${item.id}</td>
+                    <td>${item.name}</td>
+                    <td>₱${item.price}</td>
+                    <td>${item.stock}</td>
+                    <td>
+                        <button onclick="prepareEdit(${index})" style="background:#3498db; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; margin-right:5px;">Edit</button>
+                        <button onclick="deleteItem(${item.id})" style="background:#e74c3c; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">Delete</button>
+                    </td>
+                </tr>`;
+            
+            // 2. POS LIST
+            posList.innerHTML += `
+                <div class="item-row">
+                    <span><strong>${item.name}</strong><br><small>₱${item.price} | Stock: ${item.stock}</small></span>
+                    <button class="btn-action" style="width:auto;" onclick="processSale(${index})">Sell</button>
+                </div>
+            `;
+
+            // 3. REPORT TABLE
+            reportBody.innerHTML += `
+                <tr>
+                    <td>${item.name}</td>
+                    <td>${item.units_sold}</td>
+                    <td>₱${(item.units_sold * item.price).toFixed(2)}</td>
+                </tr>`;
+        });
+    }
+
+    let currentCart = [];
+
+    // Adds item to the preview list
+    function processSale(index) {
+        let item = inventory[index];
+        
+        if(item.stock <= 0) {
+            alert("Out of stock!");
+            return;
+        }
+
+        // Add to cart array
+        currentCart.push({
+            id: item.id,
+            name: item.name,
+            price: item.price
+        });
+
+        // Reduce local stock visually (so user can't oversell in one session)
+        item.stock--;
+        
+        updateOrderPreview();
+    }
+
+    function updateOrderPreview() {
+        const tbody = document.querySelector('#previewTable tbody');
+        const totalEl = document.getElementById('grandTotal');
+        const confirmBtn = document.getElementById('confirmBtn');
+        
+        tbody.innerHTML = '';
+        let total = 0;
+
+        currentCart.forEach(item => {
+            tbody.innerHTML += `<tr><td>${item.name}</td><td>1</td><td>₱${item.price}</td></tr>`;
+            total += parseFloat(item.price);
+        });
+
+        totalEl.innerText = `₱${total.toFixed(2)}`;
+
+        // Enable/Disable Confirm Button
+        if(currentCart.length > 0) {
+            confirmBtn.disabled = false;
+            confirmBtn.style.background = "var(--accent)";
+        } else {
+            confirmBtn.disabled = true;
+            confirmBtn.style.background = "#95a5a6";
+        }
+    }
+
+    // Final Step: Saves all items to DB and shows QR
+    async function confirmSale() {
+        if(currentCart.length === 0) return;
+
+        // Show QR instantly for speed
+        const totalAmount = document.getElementById('grandTotal').innerText;
+        
+        // Save receipt to database first
+        const receiptNum = 'FF' + Date.now().toString().slice(-6);
+        await saveReceiptToDB(receiptNum, currentCart, totalAmount);
+        
+        // Then generate QR with the receipt URL
+        generateQR(currentCart, totalAmount, receiptNum);
+
+        // Update DB for each item in cart
+        for (let item of currentCart) {
+            let formData = new FormData();
+            formData.append('id', item.id);
+            
+            await fetch('sell_item.php', {
+                method: 'POST',
+                body: formData
+            });
+        }
+
+        // Refresh everything
+        loadInventory();
+        currentCart = []; // Clear cart for next customer
+        document.getElementById('confirmBtn').disabled = true;
+        document.getElementById('confirmBtn').style.background = "#95a5a6";
+    }
+
+    async function saveReceiptToDB(receiptNum, cart, total) {
+        let formData = new FormData();
+        formData.append('receiptNum', receiptNum);
+        formData.append('cartData', JSON.stringify(cart));
+        formData.append('total', total);
+        formData.append('itemCount', cart.length);
+
+        try {
+            const response = await fetch('save_receipt.php', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+            if (result.success) {
+                console.log("Receipt saved successfully: " + receiptNum);
+            } else {
+                console.error("Error saving receipt:", result.error);
+            }
+        } catch (error) {
+            console.error("Error saving receipt to database:", error);
+        }
+    }
+
+    function generateQR(cart, total, receiptNum) {
+        const qrBox = document.getElementById('qrcode');
+        qrBox.innerHTML = ''; 
+        
+        // Build the receipt URL using the current window location
+        // This works on both localhost and IP addresses
+        const protocol = window.location.protocol; // http: or https:
+        const host = window.location.host; // localhost:80 or 192.168.x.x:80
+        const pathname = window.location.pathname; // /fadefree/index.php
+        const basePath = pathname.substring(0, pathname.lastIndexOf('/') + 1); // /fadefree/
+        const receiptURL = protocol + '//' + host + basePath + 'receipt.php?id=' + encodeURIComponent(receiptNum);
+        
+        // Store receipt data globally for later use
+        window.currentReceiptData = {
+            receiptNum: receiptNum,
+            cart: cart,
+            total: total,
+            dateTime: new Date(),
+            receiptURL: receiptURL
+        };
+        
+        try {
+            new QRCode(qrBox, {
+                text: receiptURL,
+                width: 150,
+                height: 150,
+                errorCorrectionLevel: 'L',
+                typeNumber: 0
+            });
+            
+            // Show receipt info below QR
+            const itemCount = cart.length;
+            const totalFormatted = typeof total === 'string' ? total : `₱${total}`;
+            document.getElementById('receiptMeta').innerHTML = `
+                <strong>Receipt #${receiptNum}</strong><br>
+                Items: ${itemCount} | Total: ${totalFormatted}<br>
+                <small style="color:#7f8c8d;">Scan the QR code to view receipt</small>
+            `;
+            console.log("QR Code generated successfully!");
+            console.log("Receipt #:", receiptNum);
+            console.log("Full URL in QR:", receiptURL);
+        } catch (error) {
+            console.error("Error generating QR code:", error);
+            qrBox.innerHTML = '<p style="color: red; padding: 20px; text-align: center;">Error: ' + error.message + '</p>';
+        }
+    }
+
+    function viewReceipt() {
+        if (!window.currentReceiptData) {
+            alert("No receipt to display. Please confirm a sale first.");
+            return;
+        }
+
+        const data = window.currentReceiptData;
+        const receiptHTML = generateReceiptHTML(data);
+        
+        document.getElementById('receiptContent').innerHTML = receiptHTML;
+        document.getElementById('receiptModal').style.display = 'flex';
+    }
+
+    function generateReceiptHTML(data) {
+        let itemsHTML = '';
+        let subtotal = 0;
+
+        data.cart.forEach(item => {
+            const price = parseFloat(item.price);
+            itemsHTML += `
+                <tr style="border-bottom: 1px dotted #ccc;">
+                    <td style="padding: 8px 0;">${item.name}</td>
+                    <td style="text-align: right; padding: 8px 0;">1</td>
+                    <td style="text-align: right; padding: 8px 0;">₱${price.toFixed(2)}</td>
+                </tr>
+            `;
+            subtotal += price;
+        });
+
+        const totalStr = typeof data.total === 'string' ? data.total.replace('₱', '') : data.total;
+        const total = parseFloat(totalStr);
+
+        const formattedDate = data.dateTime.toLocaleString('en-PH', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        return `
+            <div style="border: 2px dashed #333; padding: 15px; border-radius: 4px;">
+                <div style="text-align: center; margin-bottom: 15px;">
+                    <h2 style="margin: 5px 0; font-size: 1.3em;">🛍️ FadeFree</h2>
+                    <p style="margin: 3px 0; font-size: 0.85em; color: #666;">Digital POS System</p>
+                    <p style="margin: 3px 0; font-size: 0.85em; color: #666;">Receipt #${data.receiptNum}</p>
+                </div>
+
+                <div style="border-top: 2px dashed #333; border-bottom: 2px dashed #333; padding: 12px 0; margin: 12px 0;">
+                    <div style="text-align: center; font-size: 0.85em; color: #666;">
+                        <p>${formattedDate}</p>
+                    </div>
+                </div>
+
+                <table style="width: 100%; margin: 10px 0;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid #333;">
+                            <th style="text-align: left; padding: 8px 0;">Item</th>
+                            <th style="text-align: right; padding: 8px 0; width: 30px;">Qty</th>
+                            <th style="text-align: right; padding: 8px 0; width: 70px;">Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${itemsHTML}
+                    </tbody>
+                </table>
+
+                <div style="border-top: 1px solid #333; padding-top: 10px; margin-top: 10px;">
+                    <div style="display: flex; justify-content: space-between; margin: 8px 0; font-size: 0.95em;">
+                        <span>Subtotal:</span>
+                        <span>₱${subtotal.toFixed(2)}</span>
+                    </div>
+                </div>
+
+                <div style="border-top: 2px solid #333; border-bottom: 2px solid #333; padding: 12px 0; margin: 12px 0; text-align: right;">
+                    <div style="font-weight: bold; font-size: 1.2em;">
+                        <span style="margin-right: 10px;">TOTAL:</span>
+                        <span>₱${total.toFixed(2)}</span>
+                    </div>
+                </div>
+
+                <div style="text-align: center; margin: 15px 0; color: #666; font-size: 0.85em;">
+                    <p style="margin: 5px 0;">Thank you for your purchase!</p>
+                    <p style="margin: 5px 0;">Items Sold: ${data.cart.length}</p>
+                    <p style="margin: 5px 0; font-weight: bold; color: #333;">Your FadeFree Receipt</p>
+                </div>
+            </div>
+        `;
+    }
+
+    function printReceipt() {
+        const printWindow = window.open('', '', 'width=400,height=600');
+        const receiptContent = document.getElementById('receiptContent').innerHTML;
+        
+        printWindow.document.write(`
+            <html>
+            <head>
+                <title>Receipt</title>
+                <style>
+                    body { font-family: 'Courier New', monospace; margin: 10px; font-size: 12px; }
+                    table { width: 100%; }
+                    th, td { padding: 5px 0; }
+                </style>
+            </head>
+            <body>
+                ${receiptContent}
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+        printWindow.print();
+    }
+
+    function closeReceipt() {
+        document.getElementById('receiptModal').style.display = 'none';
+    }
+
+    function resetTransaction() {
+        currentCart = [];
+        document.querySelector('#previewTable tbody').innerHTML = '';
+        document.getElementById('grandTotal').innerText = "₱0.00";
+        document.getElementById('qrcode').innerHTML = '';
+        document.getElementById('receiptMeta').innerText = '';
+        document.getElementById('confirmBtn').disabled = true;
+        document.getElementById('confirmBtn').style.background = "#95a5a6";
+        loadInventory();
+    }
+
+    function clearQR() {
+        document.getElementById('qrcode').innerHTML = '';
+        document.getElementById('receiptMeta').innerText = '';
+    }
+
+    function clearInputs() {
+        document.getElementById('itemName').value = '';
+        document.getElementById('itemPrice').value = '';
+        document.getElementById('itemStock').value = '';
+    }
+</script>
+
+</body>
+</html>
